@@ -10,7 +10,7 @@ namespace alpha_hwr {
 
 static const char *const TAG = "alpha_hwr";
 
-void AlphaHWR::dump_config() {
+void Alpha_HWR::dump_config() {
   ESP_LOGCONFIG(TAG, "ALPHA_HWR");
   LOG_SENSOR(" ", "Flow", this->flow_sensor_);
   LOG_SENSOR(" ", "Head", this->head_sensor_);
@@ -20,9 +20,9 @@ void AlphaHWR::dump_config() {
   LOG_SENSOR(" ", "Voltage", this->voltage_sensor_);
 }
 
-void AlphaHWR::setup() {}
+void Alpha_HWR::setup() {}
 
-void AlphaHWR::extract_publish_sensor_value_(const uint8_t *response, int16_t length, int16_t response_offset,
+void Alpha_HWR::extract_publish_sensor_value_(const uint8_t *response, int16_t length, int16_t response_offset,
                                            int16_t value_offset, sensor::Sensor *sensor, float factor) {
   if (sensor == nullptr)
     return;
@@ -50,11 +50,11 @@ void AlphaHWR::extract_publish_sensor_value_(const uint8_t *response, int16_t le
   }
 }
 
-bool AlphaHWR::is_current_response_type_(const uint8_t *response_type) {
+bool Alpha_HWR::is_current_response_type_(const uint8_t *response_type) {
   return !std::memcmp(this->response_type_, response_type, GENI_RESPONSE_TYPE_LENGTH);
 }
 
-void AlphaHWR::handle_geni_response_(const uint8_t *response, uint16_t length) {
+void Alpha_HWR::handle_geni_response_(const uint8_t *response, uint16_t length) {
   if (this->response_offset_ >= this->response_length_) {
     ESP_LOGD(TAG, "[%s] GENI response begin", this->parent_->address_str().c_str());
     if (length < GENI_RESPONSE_HEADER_LENGTH) {
@@ -94,7 +94,7 @@ void AlphaHWR::handle_geni_response_(const uint8_t *response, uint16_t length) {
   this->response_offset_ += length;
 }
 
-void AlphaHWR::gattc_event_handler(esp_gattc_cb_event_t event, esp_gatt_if_t gattc_if, esp_ble_gattc_cb_param_t *param) {
+void Alpha_HWR::gattc_event_handler(esp_gattc_cb_event_t event, esp_gatt_if_t gattc_if, esp_ble_gattc_cb_param_t *param) {
   switch (event) {
     case ESP_GATTC_OPEN_EVT: {
       if (param->open.status == ESP_GATT_OK) {
@@ -159,7 +159,7 @@ void AlphaHWR::gattc_event_handler(esp_gattc_cb_event_t event, esp_gatt_if_t gat
   }
 }
 
-void AlphaHWR::send_request_(uint8_t *request, size_t len) {
+void Alpha_HWR::send_request_(uint8_t *request, size_t len) {
   auto status =
       esp_ble_gattc_write_char(this->parent_->get_gattc_if(), this->parent_->get_conn_id(), this->geni_handle_, len,
                                request, ESP_GATT_WRITE_TYPE_NO_RSP, ESP_GATT_AUTH_REQ_NONE);
@@ -167,7 +167,7 @@ void AlphaHWR::send_request_(uint8_t *request, size_t len) {
     ESP_LOGW(TAG, "[%s] esp_ble_gattc_write_char failed, status=%d", this->parent_->address_str().c_str(), status);
 }
 
-void AlphaHWR::update() {
+void Alpha_HWR::update() {
   if (this->node_state != espbt::ClientState::ESTABLISHED) {
     ESP_LOGW(TAG, "[%s] Cannot poll, not connected", this->parent_->address_str().c_str());
     return;
@@ -185,6 +185,177 @@ void AlphaHWR::update() {
     delay(25);  // need to wait between requests
   }
 }
+// Specific implementation for handling Response Type 48
+// Add this to your alpha_hwr.cpp file
+
+void Alpha_HWR::parse_hwr_response_48(const uint8_t* data, size_t len) {
+  ESP_LOGI(TAG, "=== PARSING HWR RESPONSE TYPE 48 ===");
+
+  // Current known payload: [48, 0, 1, 0, 3, 0, 0, 41]
+  // Let's systematically decode this
+
+  if (len < 8) {
+    ESP_LOGW(TAG, "Response type 48 too short: %d bytes", len);
+    return;
+  }
+
+  // Byte 0: Response type (48)
+  uint8_t response_type = data[0];
+  ESP_LOGI(TAG, "Response type: %d", response_type);
+
+  // Byte 1: Status/Mode indicator (currently 0)
+  uint8_t status_mode = data[1];
+  ESP_LOGI(TAG, "Status/Mode: %d", status_mode);
+
+  // Bytes 2-3: Could be temperature, flow, or other sensor reading
+  uint16_t value_1 = (data[3] << 8) | data[2];  // Little-endian
+  uint16_t value_1_be = (data[2] << 8) | data[3]; // Big-endian
+  ESP_LOGI(TAG, "Value 1 (LE): %d, (BE): %d", value_1, value_1_be);
+
+  // Bytes 4-5: Another potential sensor value
+  uint16_t value_2 = (data[5] << 8) | data[4];  // Little-endian
+  uint16_t value_2_be = (data[4] << 8) | data[5]; // Big-endian
+  ESP_LOGI(TAG, "Value 2 (LE): %d, (BE): %d", value_2, value_2_be);
+
+  // Byte 6: Reserved/status
+  uint8_t reserved = data[6];
+  ESP_LOGI(TAG, "Reserved/Status: %d", reserved);
+
+  // Byte 7: Checksum/terminator (currently 41)
+  uint8_t checksum = data[7];
+  ESP_LOGI(TAG, "Checksum/Terminator: %d", checksum);
+
+  // Hypothesis testing for HWR-specific data:
+
+  // 1. Temperature hypothesis (common in HWR systems)
+  if (value_1 > 0 && value_1 < 1000) {  // Reasonable temp range in 0.1°C
+    float temp_1 = value_1 / 10.0f;
+    ESP_LOGI(TAG, "HYPOTHESIS: Temperature = %.1f°C", temp_1);
+    if (this->temperature_sensor_ != nullptr) {
+      this->temperature_sensor_->publish_state(temp_1);
+    }
+  }
+
+  // 2. Flow/Power hypothesis
+  if (value_1 > 1000) {  // Could be flow in ml/min or power in mW
+    ESP_LOGI(TAG, "HYPOTHESIS: Flow/Power reading = %d", value_1);
+  }
+
+  // 3. Status bits hypothesis
+  ESP_LOGI(TAG, "Status analysis:");
+  ESP_LOGI(TAG, "  Pump running: %s", (status_mode & 0x01) ? "YES" : "NO");
+  ESP_LOGI(TAG, "  Error state: %s", (status_mode & 0x02) ? "YES" : "NO");
+  ESP_LOGI(TAG, "  Schedule active: %s", (status_mode & 0x04) ? "YES" : "NO");
+  ESP_LOGI(TAG, "  Hot water demand: %s", (status_mode & 0x08) ? "YES" : "NO");
+
+  // 4. Try to identify if this is a response to a specific command
+  ESP_LOGI(TAG, "Command correlation:");
+  if (!this->protocol_log_.empty()) {
+    auto& last_entry = this->protocol_log_.back();
+    ESP_LOGI(TAG, "  Time since last command: %d ms", millis() - last_entry.timestamp);
+
+    // Pattern matching based on command sent
+    if (last_entry.command.size() >= 7) {
+      uint8_t cmd_type = last_entry.command[6];  // Command byte from GENI protocol
+      ESP_LOGI(TAG, "  Last command type: 0x%02X", cmd_type);
+
+      switch (cmd_type) {
+        case 0x5D:  // Flow/Head request
+          ESP_LOGI(TAG, "  This might be flow/head response");
+          break;
+        case 0x57:  // Power request
+          ESP_LOGI(TAG, "  This might be power response");
+          break;
+        case 0x54:  // Temperature request (hypothetical)
+          ESP_LOGI(TAG, "  This might be temperature response");
+          break;
+      }
+    }
+  }
+
+  ESP_LOGI(TAG, "=== END PARSING TYPE 48 ===");
+}
+
+// Enhanced response handler to replace the "unknown" warning
+void Alpha_HWR::geni_response(GeniResponse &response) {
+  ESP_LOGI(TAG, "GENI Response: type=%d, len=%d", response.type, response.data.size());
+
+  // Log raw data for all responses
+  this->log_protocol_data("RESPONSE_RAW", response.data.data(), response.data.size());
+
+  switch (response.type) {
+    case 48:
+      ESP_LOGI(TAG, "Processing HWR-specific response type 48");
+      this->parse_hwr_response_48(response.data.data(), response.data.size());
+      break;
+
+    case 1:
+    case 2:
+    case 3:
+      // Handle standard Alpha3 responses
+      ESP_LOGI(TAG, "Processing standard Alpha3 response type %d", response.type);
+      // Call your existing alpha3 response handling here
+      // ... existing alpha3 code ...
+      break;
+
+    default:
+      ESP_LOGW(TAG, "Unknown response type %d - continuing analysis", response.type);
+
+      // Log unknown responses for discovery
+      if (this->protocol_discovery_mode_) {
+        ESP_LOGI(TAG, "DISCOVERY: New response type %d found", response.type);
+        this->log_protocol_data("UNKNOWN_TYPE", response.data.data(), response.data.size());
+
+        // Try to parse as if it's a variant of type 48
+        if (response.data.size() >= 7) {
+          ESP_LOGI(TAG, "Attempting to parse unknown type as HWR format...");
+          this->parse_hwr_response_48(response.data.data(), response.data.size());
+        }
+      }
+      break;
+  }
+}
+
+// Add method to manually trigger specific commands for testing
+void Alpha_HWR::send_test_command(uint8_t cmd_type) {
+  uint8_t cmd[] = {0x27, 0x07, 0xE7, 0xF8, 0x0A, 0x03, cmd_type, 0x00};
+
+  ESP_LOGI(TAG, "Sending test command: 0x%02X", cmd_type);
+  this->log_protocol_data("TEST_CMD", cmd, sizeof(cmd));
+
+  // Store command for correlation
+  if (this->protocol_discovery_mode_) {
+    ProtocolLogEntry entry;
+    entry.timestamp = millis();
+    entry.command.assign(cmd, cmd + sizeof(cmd));
+    entry.notes = "Manual test command";
+    this->protocol_log_.push_back(entry);
+  }
+
+  this->write_array(cmd, sizeof(cmd));
+}
+
+// Method to save protocol log to persistent storage (optional)
+void Alpha_HWR::dump_protocol_log() {
+  ESP_LOGI(TAG, "=== PROTOCOL LOG DUMP ===");
+  ESP_LOGI(TAG, "Total entries: %d", this->protocol_log_.size());
+
+  for (size_t i = 0; i < this->protocol_log_.size(); i++) {
+    const auto& entry = this->protocol_log_[i];
+    ESP_LOGI(TAG, "Entry %d: time=%d, cmd_len=%d, resp_len=%d, type=%d",
+             i, entry.timestamp, entry.command.size(), entry.response.size(), entry.response_type);
+
+    if (!entry.command.empty()) {
+      this->log_protocol_data("CMD", entry.command.data(), entry.command.size());
+    }
+    if (!entry.response.empty()) {
+      this->log_protocol_data("RESP", entry.response.data(), entry.response.size());
+    }
+  }
+
+  ESP_LOGI(TAG, "=== END PROTOCOL LOG ===");
+}
+
 }  // namespace alpha_hwr
 }  // namespace esphome
 

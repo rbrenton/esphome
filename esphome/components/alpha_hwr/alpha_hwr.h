@@ -4,6 +4,7 @@
 #include "esphome/components/ble_client/ble_client.h"
 #include "esphome/components/esp32_ble_tracker/esp32_ble_tracker.h"
 #include "esphome/components/sensor/sensor.h"
+#include <vector>
 
 #ifdef USE_ESP32
 
@@ -34,7 +35,7 @@ static const int16_t GENI_RESPONSE_POWER_OFFSET = 12;
 static const int16_t GENI_RESPONSE_MOTOR_POWER_OFFSET = 16;  // not sure
 static const int16_t GENI_RESPONSE_MOTOR_SPEED_OFFSET = 20;
 
-class AlphaHWR : public esphome::ble_client::BLEClientNode, public PollingComponent {
+class Alpha_HWR : public esphome::ble_client::BLEClientNode, public PollingComponent {
  public:
   void setup() override;
   void update() override;
@@ -47,6 +48,11 @@ class AlphaHWR : public esphome::ble_client::BLEClientNode, public PollingCompon
   void set_current_sensor(sensor::Sensor *sensor) { this->current_sensor_ = sensor; }
   void set_speed_sensor(sensor::Sensor *sensor) { this->speed_sensor_ = sensor; }
   void set_voltage_sensor(sensor::Sensor *sensor) { this->voltage_sensor_ = sensor; }
+
+  void set_temperature_sensor(sensor::Sensor *sensor) { this->temperature_sensor_ = temperature_sensor; }
+  void set_energy_sensor(sensor::Sensor *sensor) { this->energy_sensor_ = energy_sensor; }
+  void set_protocol_discovery_mode(bool enabled);
+  void dump_protocol_log();
 
  protected:
   sensor::Sensor *flow_sensor_{nullptr};
@@ -64,7 +70,30 @@ class AlphaHWR : public esphome::ble_client::BLEClientNode, public PollingCompon
                                      int16_t value_offset, sensor::Sensor *sensor, float factor);
   void handle_geni_response_(const uint8_t *response, uint16_t length);
   void send_request_(uint8_t *request, size_t len);
+
   bool is_current_response_type_(const uint8_t *response_type);
+    struct ProtocolLogEntry {
+    uint32_t timestamp;
+    std::vector<uint8_t> command;
+    std::vector<uint8_t> response;
+    uint8_t response_type;
+    std::string notes;
+  };
+    std::vector<ProtocolLogEntry> protocol_log_;
+  uint8_t discovery_phase_ = 0;
+  uint32_t last_discovery_command_ = 0;
+  bool protocol_discovery_mode_ = true;
+
+  // Potential HWR-specific sensors
+  sensor::Sensor *temperature_sensor_{nullptr};
+  sensor::Sensor *energy_sensor_{nullptr};
+
+  // Discovery methods
+  void log_protocol_data(const char* prefix, const uint8_t* data, size_t len);
+  void analyze_response_type_48(const uint8_t* data, size_t len);
+  void test_discovery_commands();
+  void log_discovery_summary();
+  void parse_hwr_response_48(const uint8_t* data, size_t len);
 };
 }  // namespace alpha_hwr
 }  // namespace esphome
