@@ -276,46 +276,6 @@ void Alpha_HWR::parse_hwr_response_48(const uint8_t* data, size_t len) {
   ESP_LOGI(TAG, "=== END PARSING TYPE 48 ===");
 }
 
-// Enhanced response handler to replace the "unknown" warning
-void Alpha_HWR::geni_response(GeniResponse &response) {
-  ESP_LOGI(TAG, "GENI Response: type=%d, len=%d", response.type, response.data.size());
-
-  // Log raw data for all responses
-  this->log_protocol_data("RESPONSE_RAW", response.data.data(), response.data.size());
-
-  switch (response.type) {
-    case 48:
-      ESP_LOGI(TAG, "Processing HWR-specific response type 48");
-      this->parse_hwr_response_48(response.data.data(), response.data.size());
-      break;
-
-    case 1:
-    case 2:
-    case 3:
-      // Handle standard Alpha3 responses
-      ESP_LOGI(TAG, "Processing standard Alpha3 response type %d", response.type);
-      // Call your existing alpha3 response handling here
-      // ... existing alpha3 code ...
-      break;
-
-    default:
-      ESP_LOGW(TAG, "Unknown response type %d - continuing analysis", response.type);
-
-      // Log unknown responses for discovery
-      if (this->protocol_discovery_mode_) {
-        ESP_LOGI(TAG, "DISCOVERY: New response type %d found", response.type);
-        this->log_protocol_data("UNKNOWN_TYPE", response.data.data(), response.data.size());
-
-        // Try to parse as if it's a variant of type 48
-        if (response.data.size() >= 7) {
-          ESP_LOGI(TAG, "Attempting to parse unknown type as HWR format...");
-          this->parse_hwr_response_48(response.data.data(), response.data.size());
-        }
-      }
-      break;
-  }
-}
-
 // Add method to manually trigger specific commands for testing
 void Alpha_HWR::send_test_command(uint8_t cmd_type) {
   uint8_t cmd[] = {0x27, 0x07, 0xE7, 0xF8, 0x0A, 0x03, cmd_type, 0x00};
