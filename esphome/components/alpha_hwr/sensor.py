@@ -113,7 +113,7 @@ async def to_code(config):
         cg.add(var.set_voltage_sensor(sens))
 
     # Setup HWR-specific sensors
-    if CONF_TEMPERATUREin config:
+    if CONF_TEMPERATURE in config:
         sens = await sensor.new_sensor(config[CONF_TEMPERATURE])
         cg.add(var.set_temperature_sensor(sens))
     
