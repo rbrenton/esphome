@@ -60,22 +60,22 @@ CONFIG_SCHEMA = (
                 accuracy_decimals=2,
             ),
 
-			# HWR-specific sensors
-			cv.Optional(CONF_TEMPERATURE): sensor.sensor_schema(
-				device_class=DEVICE_CLASS_TEMPERATURE,
-				state_class=STATE_CLASS_MEASUREMENT,
-				unit_of_measurement=UNIT_CELSIUS,
-				accuracy_decimals=1,
-			),
-			cv.Optional(CONF_ENERGY): sensor.sensor_schema(
-				device_class=DEVICE_CLASS_ENERGY,
-				state_class=STATE_CLASS_TOTAL_INCREASING,
-				unit_of_measurement=UNIT_KILOWATT_HOURS,
-				accuracy_decimals=2,
-			),
-			
-			# Discovery mode configuration
-			cv.Optional(CONF_PROTOCOL_DISCOVERY, default=True): cv.boolean,
+            # HWR-specific sensors
+            cv.Optional(CONF_TEMPERATURE): sensor.sensor_schema(
+                device_class=DEVICE_CLASS_TEMPERATURE,
+                state_class=STATE_CLASS_MEASUREMENT,
+                unit_of_measurement=UNIT_CELSIUS,
+                accuracy_decimals=1,
+            ),
+            cv.Optional(CONF_ENERGY): sensor.sensor_schema(
+                device_class=DEVICE_CLASS_ENERGY,
+                state_class=STATE_CLASS_TOTAL_INCREASING,
+                unit_of_measurement=UNIT_KILOWATT_HOURS,
+                accuracy_decimals=2,
+            ),
+
+            # Discovery mode configuration
+            cv.Optional(CONF_PROTOCOL_DISCOVERY, default=True): cv.boolean,
         }
     )
     .extend(ble_client.BLE_CLIENT_SCHEMA)
