@@ -276,25 +276,6 @@ void Alpha_HWR::parse_hwr_response_48(const uint8_t* data, size_t len) {
   ESP_LOGI(TAG, "=== END PARSING TYPE 48 ===");
 }
 
-// Add method to manually trigger specific commands for testing
-void Alpha_HWR::send_test_command(uint8_t cmd_type) {
-  uint8_t cmd[] = {0x27, 0x07, 0xE7, 0xF8, 0x0A, 0x03, cmd_type, 0x00};
-
-  ESP_LOGI(TAG, "Sending test command: 0x%02X", cmd_type);
-  this->log_protocol_data("TEST_CMD", cmd, sizeof(cmd));
-
-  // Store command for correlation
-  if (this->protocol_discovery_mode_) {
-    ProtocolLogEntry entry;
-    entry.timestamp = millis();
-    entry.command.assign(cmd, cmd + sizeof(cmd));
-    entry.notes = "Manual test command";
-    this->protocol_log_.push_back(entry);
-  }
-
-  this->write_array(cmd, sizeof(cmd));
-}
-
 // Method to save protocol log to persistent storage (optional)
 void Alpha_HWR::dump_protocol_log() {
   ESP_LOGI(TAG, "=== PROTOCOL LOG DUMP ===");

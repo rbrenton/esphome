@@ -53,6 +53,7 @@ class Alpha_HWR : public esphome::ble_client::BLEClientNode, public PollingCompo
   void set_energy_sensor(sensor::Sensor *sensor) { this->energy_sensor_ = sensor; }
   void set_protocol_discovery_mode(bool enabled);
   void dump_protocol_log();
+  void send_test_command(uint8_t cmd_type);
 
  protected:
   sensor::Sensor *flow_sensor_{nullptr};
