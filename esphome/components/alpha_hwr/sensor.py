@@ -120,6 +120,3 @@ async def to_code(config):
         sens = await sensor.new_sensor(config[CONF_ENERGY])
         cg.add(var.set_energy_sensor(sens))
     
-    # Set discovery mode
-    cg.add(var.set_protocol_discovery_mode(config[CONF_PROTOCOL_DISCOVERY]))
-
