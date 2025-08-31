@@ -10,6 +10,30 @@ namespace alpha_hwr {
 
 static const char *const TAG = "alpha_hwr";
 
+
+std::vector<KnownCommand> known_commands_ = {
+  {"FLOW_HEAD", {39, 7, 231, 248, 10, 3, 93, 1, 33, 82, 31}, "Alpha3 Flow/Head request"},
+  {"POWER", {39, 7, 231, 248, 10, 3, 87, 0, 69, 138, 205}, "Alpha3 Power request"},
+  {"TEMP_TEST", {39, 7, 231, 248, 10, 3, 84, 0, 69, 138, 205}, "Temperature test command"},
+  // Add more as discovered
+};
+
+void ProtocolCapture::log_packet(const std::string& direction, const uint8_t* data, size_t len, const std::string& notes) {
+  if (!enabled || len == 0) return;
+
+  PacketEntry entry;
+  entry.timestamp = millis();
+  entry.direction = direction;
+  entry.data.assign(data, data + len);
+  entry.notes = notes;
+  packets.push_back(entry);
+
+  // Limit log size to prevent memory issues
+  if (packets.size() > 100) {
+    packets.erase(packets.begin());
+  }
+}
+
 void Alpha_HWR::dump_config() {
   ESP_LOGCONFIG(TAG, "ALPHA_HWR");
   LOG_SENSOR(" ", "Flow", this->flow_sensor_);
@@ -55,6 +79,9 @@ bool Alpha_HWR::is_current_response_type_(const uint8_t *response_type) {
 }
 
 void Alpha_HWR::handle_geni_response_(const uint8_t *response, uint16_t length) {
+  // Log EVERYTHING that comes in
+  this->log_raw_protocol_data("RX", response, length, "GENI_RESPONSE");
+  
   if (this->response_offset_ >= this->response_length_) {
     ESP_LOGD(TAG, "[%s] GENI response begin", this->parent_->address_str().c_str());
     if (length < GENI_RESPONSE_HEADER_LENGTH) {
@@ -70,20 +97,14 @@ void Alpha_HWR::handle_geni_response_(const uint8_t *response, uint16_t length) 
     this->response_offset_ = -GENI_RESPONSE_HEADER_LENGTH;
     std::memcpy(this->response_type_, response + 5, GENI_RESPONSE_TYPE_LENGTH);
     
-    // ADD NEW: Enhanced logging for protocol discovery
-    if (this->protocol_discovery_mode_) {
-      ESP_LOGI(TAG, "=== NEW GENI RESPONSE RECEIVED ===");
-      this->log_protocol_data("FULL_RESPONSE", response, length);
-      this->log_protocol_data("RESPONSE_TYPE", this->response_type_, GENI_RESPONSE_TYPE_LENGTH);
-    }
+    // Enhanced response type logging
+    this->log_raw_protocol_data("RX", this->response_type_, GENI_RESPONSE_TYPE_LENGTH, "RESPONSE_TYPE");
   }
 
-  auto extract_publish_sensor_value = [response, length, this](int16_t value_offset, sensor::Sensor *sensor,
-                                                               float factor) {
+  auto extract_publish_sensor_value = [response, length, this](int16_t value_offset, sensor::Sensor *sensor, float factor) {
     this->extract_publish_sensor_value_(response, length, this->response_offset_, value_offset, sensor, factor);
   };
 
-  // Handle known Alpha3 response types
   if (this->is_current_response_type_(GENI_RESPONSE_TYPE_FLOW_HEAD)) {
     ESP_LOGD(TAG, "[%s] FLOW HEAD Response", this->parent_->address_str().c_str());
     extract_publish_sensor_value(GENI_RESPONSE_FLOW_OFFSET, this->flow_sensor_, 3600.0F);
@@ -95,24 +116,43 @@ void Alpha_HWR::handle_geni_response_(const uint8_t *response, uint16_t length) 
     extract_publish_sensor_value(GENI_RESPONSE_MOTOR_SPEED_OFFSET, this->speed_sensor_, 1.0F);
     extract_publish_sensor_value(GENI_RESPONSE_VOLTAGE_AC_OFFSET, this->voltage_sensor_, 1.0F);
   } else {
-    // REPLACE: Enhanced unknown response handling
-    ESP_LOGI(TAG, "[%s] UNKNOWN GENI response - analyzing for HWR protocol", this->parent_->address_str().c_str());
-    
-    // Check if first byte is 48 (our HWR type)
     if (this->response_type_[0] == 48) {
-      ESP_LOGI(TAG, "This appears to be HWR response type 48 - analyzing...");
+      ESP_LOGI(TAG, "[%s] HWR STATUS Response (Type 48)", this->parent_->address_str().c_str());
       this->analyze_response_type_48(this->response_type_, GENI_RESPONSE_TYPE_LENGTH);
     } else {
-      ESP_LOGW(TAG, "Truly unknown response type %d - logging for analysis", this->response_type_[0]);
-      ESP_LOGW(TAG, "Unknown response type bytes: %d %d %d %d %d %d %d %d", 
-               this->response_type_[0], this->response_type_[1], this->response_type_[2], this->response_type_[3],
-               this->response_type_[4], this->response_type_[5], this->response_type_[6], this->response_type_[7]);
-      this->log_protocol_data("UNKNOWN_RESPONSE", response, length);
+      ESP_LOGW(TAG, "Unknown response type: %d", this->response_type_[0]);
     }
   }
-  
+
   this->response_offset_ += length;
 }
+
+void Alpha_HWR::export_protocol_capture() {
+  ESP_LOGI(TAG, "=== PROTOCOL CAPTURE EXPORT ===");
+  ESP_LOGI(TAG, "Total packets: %d", this->protocol_capture_.packets.size());
+  ESP_LOGI(TAG, "Format: TIMESTAMP DIRECTION LENGTH DATA [NOTES]");
+  ESP_LOGI(TAG, "");
+
+  for (const auto& packet : this->protocol_capture_.packets) {
+    std::string hex_data;
+    for (size_t i = 0; i < packet.data.size(); i++) {
+      char hex_buf[4];
+      snprintf(hex_buf, sizeof(hex_buf), "%02X", packet.data[i]);
+      hex_data += hex_buf;
+      if (i < packet.data.size() - 1) hex_data += " ";
+    }
+
+    ESP_LOGI(TAG, "%d %s %d %s %s",
+             packet.timestamp,
+             packet.direction.c_str(),
+             packet.data.size(),
+             hex_data.c_str(),
+             packet.notes.c_str());
+  }
+
+  ESP_LOGI(TAG, "=== END PROTOCOL CAPTURE ===");
+}
+
 void Alpha_HWR::test_discovery_commands() {
   if (!this->protocol_discovery_mode_) return;
   
@@ -406,6 +446,163 @@ void Alpha_HWR::log_protocol_data(const char* prefix, const uint8_t* data, size_
   ESP_LOGI(TAG, "%s DEC: [%s]", prefix, dec_string.c_str());
   ESP_LOGI(TAG, "%s LEN: %d", prefix, len);
 }
+
+void Alpha_HWR::log_raw_protocol_data(const char* direction, const uint8_t* data, size_t len, const char* context) {
+  if (len == 0) return;
+
+  // Log to protocol capture system
+  this->protocol_capture_.log_packet(direction, data, len, context);
+
+  // Enhanced console logging with timestamp and context
+  uint32_t timestamp = millis();
+  ESP_LOGI(TAG, "=== RAW PROTOCOL [%s] [%s] ===", direction, context);
+  ESP_LOGI(TAG, "Timestamp: %d ms", timestamp);
+  ESP_LOGI(TAG, "Length: %d bytes", len);
+
+  // Hex dump in 16-byte rows (like hexdump -C)
+  for (size_t i = 0; i < len; i += 16) {
+    std::string hex_line, ascii_line;
+    char addr_buf[16];
+    snprintf(addr_buf, sizeof(addr_buf), "%04x:", (unsigned int)i);
+
+    // Hex bytes
+    for (size_t j = 0; j < 16; j++) {
+      if (i + j < len) {
+        char hex_buf[4];
+        snprintf(hex_buf, sizeof(hex_buf), " %02x", data[i + j]);
+        hex_line += hex_buf;
+
+        // ASCII representation
+        uint8_t byte = data[i + j];
+        ascii_line += (byte >= 32 && byte <= 126) ? (char)byte : '.';
+      } else {
+        hex_line += "   ";
+        ascii_line += " ";
+      }
+    }
+
+    ESP_LOGI(TAG, "%s%s |%s|", addr_buf, hex_line.c_str(), ascii_line.c_str());
+  }
+
+  // One-line format for easy copy/paste
+  std::string hex_oneline;
+  for (size_t i = 0; i < len; i++) {
+    char hex_buf[4];
+    snprintf(hex_buf, sizeof(hex_buf), "%02X", data[i]);
+    hex_oneline += hex_buf;
+    if (i < len - 1) hex_oneline += " ";
+  }
+  ESP_LOGI(TAG, "HEX: [%s]", hex_oneline.c_str());
+  ESP_LOGI(TAG, "=== END RAW PROTOCOL ===");
+}
+
+void Alpha_HWR::send_raw_command(const std::string& hex_string) {
+  // Parse hex string "27 07 E7 F8 0A 03 54 00 45 8A CD"
+  std::vector<uint8_t> bytes;
+  std::string hex_clean = hex_string;
+
+  // Remove any non-hex characters
+  std::string cleaned;
+  for (char c : hex_clean) {
+    if (std::isxdigit(c)) {
+      cleaned += c;
+    }
+  }
+
+  // Parse pairs of hex digits
+  for (size_t i = 0; i < cleaned.length(); i += 2) {
+    if (i + 1 < cleaned.length()) {
+      std::string hex_pair = cleaned.substr(i, 2);
+      uint8_t byte = (uint8_t)std::strtoul(hex_pair.c_str(), nullptr, 16);
+      bytes.push_back(byte);
+    }
+  }
+
+  if (bytes.empty()) {
+    ESP_LOGW(TAG, "Invalid hex string: %s", hex_string.c_str());
+    return;
+  }
+
+  ESP_LOGI(TAG, "=== SENDING RAW COMMAND ===");
+  ESP_LOGI(TAG, "Input: %s", hex_string.c_str());
+  this->log_raw_protocol_data("TX", bytes.data(), bytes.size(), "RAW_COMMAND");
+
+  this->send_request_(bytes.data(), bytes.size());
+}
+
+
+void Alpha_HWR::send_known_command(const std::string& name) {
+  for (const auto& cmd : this->known_commands_) {
+    if (cmd.name == name) {
+      ESP_LOGI(TAG, "Sending known command: %s (%s)", name.c_str(), cmd.description.c_str());
+      this->log_raw_protocol_data("TX", cmd.data.data(), cmd.data.size(), cmd.name.c_str());
+      this->send_request_((uint8_t*)cmd.data.data(), cmd.data.size());
+      return;
+    }
+  }
+  ESP_LOGW(TAG, "Unknown command: %s", name.c_str());
+}
+
+// 7. SYSTEMATIC COMMAND SWEEPER
+void Alpha_HWR::sweep_command_range(uint8_t start_cmd, uint8_t end_cmd, uint8_t param) {
+  static uint8_t current_cmd = start_cmd;
+  static uint32_t last_sweep_time = 0;
+  
+  if (millis() - last_sweep_time < 3000) return;  // 3 second intervals
+  
+  if (current_cmd <= end_cmd) {
+    ESP_LOGI(TAG, "=== COMMAND SWEEP: 0x%02X (param=%d) ===", current_cmd, param);
+    uint8_t cmd[] = {39, 7, 231, 248, 10, 3, current_cmd, param, 69, 138, 205};
+    
+    char context[32];
+    snprintf(context, sizeof(context), "SWEEP_0x%02X", current_cmd);
+    this->log_raw_protocol_data("TX", cmd, sizeof(cmd), context);
+    this->send_request_(cmd, sizeof(cmd));
+    
+    current_cmd++;
+    last_sweep_time = millis();
+  } else {
+    ESP_LOGI(TAG, "Command sweep complete (0x%02X to 0x%02X)", start_cmd, end_cmd);
+    current_cmd = start_cmd;  // Reset for next sweep
+  }
+}
+
+// 8. PROTOCOL ANALYSIS TOOLS
+void Alpha_HWR::analyze_response_patterns() {
+  ESP_LOGI(TAG, "=== RESPONSE PATTERN ANALYSIS ===");
+  
+  std::map<uint8_t, int> response_type_counts;
+  std::map<std::string, int> pattern_counts;
+  
+  for (const auto& packet : this->protocol_capture_.packets) {
+    if (packet.direction == "RX" && !packet.data.empty()) {
+      response_type_counts[packet.data[0]]++;
+      
+      // Create pattern string for first few bytes
+      std::string pattern;
+      for (size_t i = 0; i < std::min((size_t)4, packet.data.size()); i++) {
+        char buf[8];
+        snprintf(buf, sizeof(buf), "%02X", packet.data[i]);
+        pattern += buf;
+        if (i < 3) pattern += " ";
+      }
+      pattern_counts[pattern]++;
+    }
+  }
+  
+  ESP_LOGI(TAG, "Response type frequencies:");
+  for (const auto& pair : response_type_counts) {
+    ESP_LOGI(TAG, "  Type %d: %d occurrences", pair.first, pair.second);
+  }
+  
+  ESP_LOGI(TAG, "Common response patterns:");
+  for (const auto& pair : pattern_counts) {
+    ESP_LOGI(TAG, "  [%s]: %d occurrences", pair.first.c_str(), pair.second);
+  }
+  
+  ESP_LOGI(TAG, "=== END ANALYSIS ===");
+}
+
 }  // namespace alpha_hwr
 }  // namespace esphome
 
